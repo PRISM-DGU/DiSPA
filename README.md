@@ -1,7 +1,7 @@
 # DiSPA
 
 Differential Substructure-Pathway Attention for Drug Response Prediction
-
+<img width="760" height="380" alt="스크린샷 2026-01-12 오후 7 15 32" src="https://github.com/user-attachments/assets/f11a58c1-711e-4590-80ce-d743fd7745fa" />
 ## Project Structure
 
 ```
@@ -10,6 +10,7 @@ DiSPA/
 ├── train.py          # Training (5-fold CV)
 ├── test.py           # Evaluation
 ├── dataset.py        # Dataset & DataLoader
+
 ├── split.py          # Data splitting
 ├── utils.py          # Utilities
 ├── config.yml        # Hyperparameters
