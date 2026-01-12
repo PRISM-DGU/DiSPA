@@ -1,6 +1,6 @@
 # DiSPA
 
-Differential Substrate and Pathway Attention for Drug Response Prediction
+Differential Substructure-Pathway Attention for Drug Response Prediction
 
 ## Project Structure
 
