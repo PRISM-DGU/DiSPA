@@ -1,0 +1,71 @@
+training:
+  device: cuda:0
+  batch_size: 2048
+  learning_rate: 0.0004
+  num_epochs: 300
+  weight_decay: 0.0005
+  early_stopping_patience: 100
+  scheduler:
+    type: plateau
+    plateau:
+      mode: min
+      factor: 0.5
+      patience: 15
+      min_lr: 1.0e-06
+      threshold: 0.0001
+      cooldown: 3
+save:
+  isSave: false
+  save_fold_number: 1
+model:
+  isDiffer: true
+  max_drug_sequence_length: 17
+  max_gene_slots: 218
+  gene_input_dim: 218
+  drug_input_dim: 768
+  gene_ffn_output_dim: 192
+  drug_ffn_output_dim: 192
+  gene_ffn_hidden_dim: 512
+  drug_ffn_hidden_dim: 512
+  gene_ffn_dropout: 0.5
+  drug_ffn_dropout: 0.5
+  cross_attn_embedding_dim: 192
+  num_heads: 4
+  depth: 1
+  mlp_dropout: 0.3
+  final_embedding_dim: 512
+  final_dim_reduction_factor: 2
+  output_dim: 1
+  regressor_residual_every: 2
+  regressor_residual_proj: false
+  regressor_last_dropout: false
+  regressor_final_norm: false
+  regressor_layer_configs:
+  - dim: 1536
+    norm: batch
+    act: gelu
+    dropout: 0.1
+  - dim: 768
+    norm: batch
+    act: gelu
+    dropout: 0.1
+  - dim: 256
+    norm: batch
+    act: gelu
+    dropout: 0.1
+  - dim: 64
+    norm: batch
+    act: gelu
+    dropout: 0.1
+  - dim: 32
+    norm: batch
+    act: gelu
+    dropout: 0.1
+data:
+  pathway_gene_indices_path: ./input_toy/pathway_gene_indices.pt
+  cross_validation_data_dir: Sample_Data
+  test_data_path: Sample_Data/test_dataset.pt
+system:
+  timezone: Asia/Seoul
+  seed: 42
+  pytorch_cuda_alloc_conf: expandable_segments:True

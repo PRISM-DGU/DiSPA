@@ -1,0 +1,43 @@
+name: dispa
+channels:
+  - pytorch
+  - nvidia
+  - conda-forge
+  - defaults
+
+dependencies:
+  # Python
+  - python>=3.10
+
+  # PyTorch (CUDA 12.8)
+  - pytorch>=2.0
+  - pytorch-cuda=12.8
+
+  # Scientific Computing
+  - numpy
+  - scipy
+  - scikit-learn
+  - pandas
+
+  # Utilities
+  - pyyaml
+  - tqdm
+  - matplotlib
+
+  # Pip packages
+  - pip
+  - pip:
+      # PyTorch Geometric (optional - imported but not used in current code)
+      # Uncomment if you need graph neural network features
+      - torch-geometric
+      - torch-scatter
+      - torch-sparse
+      - torch-cluster
+
+      # Transformers (for ChemBERTa embedding generation)
+      # Uncomment if you need to generate drug embeddings
+      - transformers
+
+      # RDKit (for BRICS substructure decomposition)
+      # Uncomment if you need to preprocess drug structures
+      - rdkit
