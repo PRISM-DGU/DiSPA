@@ -62,7 +62,7 @@ model:
     act: gelu
     dropout: 0.1
 data:
-  pathway_gene_indices_path: ./input_toy/pathway_gene_indices.pt
+  pathway_gene_indices_path: ./input/pathway_gene_indices.pt
   cross_validation_data_dir: Sample_Data
   test_data_path: Sample_Data/test_dataset.pt
 system:
