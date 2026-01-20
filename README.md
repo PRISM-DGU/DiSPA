@@ -66,3 +66,4 @@ model:
   num_heads: 4
   depth: 1
 ```
+**Note:** Full hyperparameters will be updated soon.
