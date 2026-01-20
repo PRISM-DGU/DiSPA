@@ -50,7 +50,7 @@ python test.py --checkpoint_date 20250712_21
 
 Results saved to `results/`
 
-## Configuration<img width="1895" height="892" alt="overview-1" src="https://github.com/user-attachments/assets/ccfa3896-8580-4581-a938-e486b5175474" />
+## Configuration
 
 
 Edit `config.yml` to change hyperparameters:
