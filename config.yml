@@ -1,19 +1,19 @@
 training:
   device: cuda:0
-  batch_size: 2048
-  learning_rate: 0.0004
-  num_epochs: 300
-  weight_decay: 0.0005
-  early_stopping_patience: 100
+  batch_size: 512
+  learning_rate: 0.0001
+  num_epochs: 5
+  weight_decay: 0.0001
+  early_stopping_patience: 10
   scheduler:
     type: plateau
     plateau:
       mode: min
-      factor: 0.5
-      patience: 15
-      min_lr: 1.0e-06
+      factor: 0.3
+      patience: 10
+      min_lr: 1.0e-03
       threshold: 0.0001
-      cooldown: 3
+      cooldown: 5
 save:
   isSave: false
   save_fold_number: 1
@@ -41,14 +41,6 @@ model:
   regressor_last_dropout: false
   regressor_final_norm: false
   regressor_layer_configs:
-  - dim: 1536
-    norm: batch
-    act: gelu
-    dropout: 0.1
-  - dim: 768
-    norm: batch
-    act: gelu
-    dropout: 0.1
   - dim: 256
     norm: batch
     act: gelu
