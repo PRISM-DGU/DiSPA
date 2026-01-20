@@ -1,7 +1,7 @@
 # DiSPA
 
 Differential Substructure-Pathway Attention for Drug Response Prediction
-<img width="760" height="380" alt="스크린샷 2026-01-12 오후 7 15 32" src="https://github.com/user-attachments/assets/f11a58c1-711e-4590-80ce-d743fd7745fa" />
+<img width="760" height="380" alt="스크린샷 2026-01-12 오후 7 15 32" src="https://github.com/user-attachments/assets/2eeb1680-0307-44af-88a5-0b24163b3b85" />
 ## Project Structure
 
 ```
@@ -50,7 +50,8 @@ python test.py --checkpoint_date 20250712_21
 
 Results saved to `results/`
 
-## Configuration
+## Configuration<img width="1895" height="892" alt="overview-1" src="https://github.com/user-attachments/assets/ccfa3896-8580-4581-a938-e486b5175474" />
+
 
 Edit `config.yml` to change hyperparameters:
 
