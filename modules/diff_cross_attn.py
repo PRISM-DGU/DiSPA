@@ -5,17 +5,28 @@ import math
 
 from modules.rms_norm import RMSNorm
 
+# =============================================================================
+# [1] HELPER FUNCTION
+# =============================================================================
 def stable_softmax(x, dim, eps=1e-20):
+    """
+    Numerically stable Softmax function.
+    """
     x = x.to(dtype=torch.float32)
     x_max, _ = torch.max(x, dim=dim, keepdim=True)
     x_exp = torch.exp(x - x_max)
     x_exp_sum = x_exp.sum(dim=dim, keepdim=True) + eps
     return x_exp / x_exp_sum
 
+# =============================================================================
+# [2] [View 1] Path2Sub
+# =============================================================================
 class Path2SubDifferCrossMHA(nn.Module):
     """
+    [View 1] Path2Sub
+
     Pathway:  [B, P, E]
-    Substrate: [B, S, E]
+    Substructure: [B, S, E]
     Output:   [B, P, E]
     """
     def __init__(self, pathway_embed_dim: int, drug_embed_dim: int, attention_dim: int, num_heads: int, depth: int):
@@ -29,14 +40,18 @@ class Path2SubDifferCrossMHA(nn.Module):
         self.drug_embed_dim = drug_embed_dim
         self.attention_dim = attention_dim
         self.num_heads = num_heads
+
+        # Head dim is halved because we generate pairs of heads
         self.head_dim = attention_dim // (2 * num_heads)
         self.scaling = self.head_dim ** -0.5
 
+        # Projections produce 2 * num_heads to support differential mechanism
         self.q_proj = nn.Linear(pathway_embed_dim, 2 * num_heads * self.head_dim, bias=False)
         self.k_proj = nn.Linear(drug_embed_dim, 2 * num_heads * self.head_dim, bias=False)
         self.v_proj = nn.Linear(drug_embed_dim, 2 * num_heads * self.head_dim, bias=False)
         self.out_proj = nn.Linear(2 * num_heads * self.head_dim, pathway_embed_dim, bias=False)
 
+        # [Learnable Parameters] For controlling the 'lambda' scaling factor
         self.lambda_init = 0.8 - 0.6 * math.exp(-0.3 * depth)
         self.lambda_q1 = nn.Parameter(torch.zeros(self.head_dim, dtype=torch.float32).normal_(mean=0,std=0.1))
         self.lambda_k1 = nn.Parameter(torch.zeros(self.head_dim, dtype=torch.float32).normal_(mean=0,std=0.1))
@@ -47,13 +62,21 @@ class Path2SubDifferCrossMHA(nn.Module):
 
     def forward(self, query: torch.Tensor, key: torch.Tensor, key_mask: torch.Tensor = None):
         """
-        query(pathway): [B, P, E]
-        key(drug): [B, S, E]
-        output: [B, P, E]
+        Forward pass for Differential Cross-Attention.
+
+        Args:
+            query(pathway): [B, P, E]
+            key(drug): [B, S, E]
+        Returns:
+            output: [B, P, E]
         """
         B, P, E = query.shape
         _, S, E = key.shape
         
+        # ---------------------------------------------------------------------
+        # [Step 1] Projection & Reshaping for 2 Separate Heads
+        # ---------------------------------------------------------------------
+        # Q, K, V are split into [B, *, Heads, 2, Head_Dim]
         Q = (self.q_proj(query)
              .view(B, P, self.num_heads, 2, self.head_dim)
              .permute(0, 2, 3, 1, 4))
@@ -64,8 +87,12 @@ class Path2SubDifferCrossMHA(nn.Module):
              .view(B, S, self.num_heads, 2, self.head_dim)
              .permute(0, 2, 3, 1, 4))
 
+        # ---------------------------------------------------------------------
+        # [Step 2] Compute Attention Scores for Both Maps
+        # ---------------------------------------------------------------------
         Q = Q * self.scaling
         scores = torch.matmul(Q, K.transpose(-1, -2))
+
         if key_mask is not None:
             # key_mask: [B, S] (True = valid, False = padding)
             key_mask = key_mask.to(Q.device)
@@ -75,19 +102,35 @@ class Path2SubDifferCrossMHA(nn.Module):
 
         scores = stable_softmax(scores, dim=-1)
 
+        # ---------------------------------------------------------------------
+        # [Step 3] Calculate Learnable Lambda (Scaling Factor)
+        # ---------------------------------------------------------------------
+        # Computes dynamic lambda values based on learned parameters
         lambda_1 = torch.exp(torch.sum(self.lambda_q1 * self.lambda_k1, dim=-1).float()).type_as(Q)
         lambda_2 = torch.exp(torch.sum(self.lambda_q2 * self.lambda_k2, dim=-1).float()).type_as(Q)
         lambda_full = lambda_1 - lambda_2 + self.lambda_init
         
-        slot0 = scores[:, :, 0]
-        slot1 = scores[:, :, 1]
-        diff_attn = slot0 - lambda_full * slot1
+        # ---------------------------------------------------------------------
+        # [Step 4] Compute Differential Attention (Map1 - Lambda * Map2)
+        # ---------------------------------------------------------------------
+        slot0 = scores[:, :, 0] # First Attention Map
+        slot1 = scores[:, :, 1] # Second Attention Map
+        diff_attn = slot0 - lambda_full * slot1 # The Core Differential Logic
 
+        # ---------------------------------------------------------------------
+        # [Step 5] Aggregation & Output Projection
+        # ---------------------------------------------------------------------
+        # Prepare Values for aggregation
         V_cat = (V.permute(0,1,3,2,4)
                  .reshape(B, self.num_heads, S, 2*self.head_dim))
 
+        # Weighted Sum using Differential Attention Map
         out = torch.matmul(diff_attn, V_cat)
+
+        # Apply RMSNorm and Residual Scaling
         out = self.subln(out) * (1 - self.lambda_init)
+
+        # Reshape and Project to Output Dimension
         out = (out.permute(0,2,1,3)
                .reshape(B, P, 2*self.num_heads*self.head_dim))
         
@@ -96,8 +139,13 @@ class Path2SubDifferCrossMHA(nn.Module):
 
         return out, diff_attn
     
+# =============================================================================
+# [3] [View 2] Drug2Path 
+# =============================================================================    
 class Drug2PathDifferCrossMHA(nn.Module):
     """
+    [View 2] Drug2Path
+
     Drug:     [B, 1, E]
     Pathway:  [B, P, E]
     Output:   [B, 1, E]
@@ -131,8 +179,11 @@ class Drug2PathDifferCrossMHA(nn.Module):
 
     def forward(self, query: torch.Tensor, key: torch.Tensor, key_mask: torch.Tensor = None):
         """
-        query(drug):   [B, 1, E]
-        key(pathway):  [B, P, E]
+        Forward pass for Differential Cross-Attention.
+        Args:
+            query (drug):   [B, 1, E]
+            key (pathway):  [B, P, E]
+
         Returns:
             out:        [B, 1, E]
             diff_attn:  [B, H, 1, P]
@@ -140,22 +191,37 @@ class Drug2PathDifferCrossMHA(nn.Module):
         B, _, _ = query.shape
         _, P, E = key.shape
 
+        # ---------------------------------------------------------------------
+        # [Step 1] Projection & Multi-Head Split
+        # ---------------------------------------------------------------------
         Q = self.q_proj(query).view(B, 1, self.num_heads, 2, self.head_dim).permute(0, 2, 3, 1, 4)
         K = self.k_proj(key).view(B, P, self.num_heads, 2, self.head_dim).permute(0, 2, 3, 1, 4)
         V = self.v_proj(key).view(B, P, self.num_heads, 2, self.head_dim).permute(0, 2, 3, 1, 4)
 
+        # ---------------------------------------------------------------------
+        # [Step 2] Compute Scores
+        # ---------------------------------------------------------------------
         Q = Q * self.scaling
         scores = torch.matmul(Q, K.transpose(-1, -2))  # [B, H, 2, 1, P]
         scores = stable_softmax(scores, dim=-1)
 
+        # ---------------------------------------------------------------------
+        # [Step 3] Compute Lambda
+        # ---------------------------------------------------------------------
         lambda_1 = torch.exp(torch.sum(self.lambda_q1 * self.lambda_k1)).type_as(Q)
         lambda_2 = torch.exp(torch.sum(self.lambda_q2 * self.lambda_k2)).type_as(Q)
         lambda_full = lambda_1 - lambda_2 + self.lambda_init
 
+        # ---------------------------------------------------------------------
+        # [Step 4] Compute Differential Attention
+        # ---------------------------------------------------------------------
         slot0 = scores[:, :, 0]  # [B, H, 1, P]
         slot1 = scores[:, :, 1]  # [B, H, 1, P]
         diff_attn = slot0 - lambda_full * slot1  # [B, H, 1, P]
 
+        # ---------------------------------------------------------------------
+        # [Step 5] Output Projection
+        # ---------------------------------------------------------------------
         V_cat = V.permute(0, 1, 3, 2, 4).reshape(B, self.num_heads, P, 2 * self.head_dim)
         out = torch.matmul(diff_attn, V_cat)  # [B, H, 1, 2D]
         out = self.subln(out) * (1 - self.lambda_init)

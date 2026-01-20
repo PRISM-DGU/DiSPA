@@ -2,14 +2,17 @@ import torch
 from torch.utils.data import Dataset
 from torch_geometric.data import Batch
 
-#  [1] DATASET
+# =============================================================================
+#  [1] DATASET CLASS
+# =============================================================================
 class DrugResponseDataset(Dataset):
-    def __init__(self, gene_embeddings, drug_embeddings, drug_substructure_embeddings, drug_substructure_masks, labels, sample_indices, **kwargs):
-        
+    """Dataset for Drug Response Prediction"""
+
+    def __init__(self, gene_embeddings, drug_embeddings, drug_substructure_embeddings, drug_substructure_masks, labels, sample_indices, **kwargs):  
         self.gene_embeddings = gene_embeddings
         self.drug_embeddings = drug_embeddings
-        self.drug_substructure_embeddings = drug_substructure_embeddings # [L, 768]
-        self.drug_substructure_masks = drug_substructure_masks # [L]
+        self.drug_substructure_embeddings = drug_substructure_embeddings 
+        self.drug_substructure_masks = drug_substructure_masks
         self.labels = labels
         self.sample_indices = sample_indices
 
@@ -17,11 +20,14 @@ class DrugResponseDataset(Dataset):
         return len(self.sample_indices)
 
     def __getitem__(self, idx):
+        # 1. Get indices
         cell_line_id, drug_id = self.sample_indices[idx]
-        gene_embedding = self.gene_embeddings[cell_line_id]  # shape: [1692, 10]
-        drug_embedding = self.drug_embeddings[drug_id]  # shape: [1, 768]
-        drug_substructure_embedding = self.drug_substructure_embeddings[drug_id]  # shape: [L, 768]
-        drug_substructure_mask = self.drug_substructure_masks[drug_id]  # shape: [L]
+
+        # 2. Get features
+        gene_embedding = self.gene_embeddings[cell_line_id]  
+        drug_embedding = self.drug_embeddings[drug_id]  
+        drug_substructure_embedding = self.drug_substructure_embeddings[drug_id]  
+        drug_substructure_mask = self.drug_substructure_masks[drug_id]  
         label = self.labels[cell_line_id, drug_id]
 
         return {
@@ -32,9 +38,12 @@ class DrugResponseDataset(Dataset):
             'label': label,
             'sample_index': (cell_line_id, drug_id) 
         }
-
+    
+# =============================================================================
 #  [2] COLLATE FUNCTION
+# =============================================================================
 def collate_fn(batch):
+    """Stacks samples into a batch."""
     gene_embeddings = []
     drug_embeddings = []
     drug_substructure_embeddings = []
@@ -51,10 +60,10 @@ def collate_fn(batch):
         sample_indices.append(item['sample_index'])
 
     return {
-        'gene_embeddings': torch.stack(gene_embeddings),
-        'drug_embeddings': torch.stack(drug_embeddings),  # [B, 1, 768]
-        'drug_substructure_embeddings': torch.stack(drug_substructure_embeddings),  # [B, L, 768]
-        'drug_substructure_masks': torch.stack(drug_substructure_masks),  # [B, L]
-        'labels': torch.tensor(labels, dtype=torch.float32),
+        'gene_embeddings': torch.stack(gene_embeddings), 
+        'drug_embeddings': torch.stack(drug_embeddings),  
+        'drug_substructure_embeddings': torch.stack(drug_substructure_embeddings),  
+        'drug_substructure_masks': torch.stack(drug_substructure_masks),  
+        'labels': torch.tensor(labels, dtype=torch.float32),              
         'sample_indices': sample_indices
     }

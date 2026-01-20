@@ -16,37 +16,41 @@ from dataset import DrugResponseDataset, collate_fn
 from model import DrugResponseModel
 from utils import set_seed, plot_predictions
 
-# ========== Configuration ==========
-# Parse command line
+# =============================================================================
+# [1] CONFIGURATION & SETUP
+# =============================================================================
 def parse_args():
+    """Parse command line arguments for the testing phase."""
     parser = argparse.ArgumentParser(description='Drug Response Prediction Testing')
     parser.add_argument('--config', type=str, default='config.yml', 
                        help='Path to configuration file (default: config.yml)')
     parser.add_argument('--checkpoint_date', type=str, required=True,
-                       help='Checkpoint date folder (e.g., 20250712_21)')
+                       help='Checkpoint date folder (e.g., 20260120_21)')
     return parser.parse_args()
 
-# Load configuration
 def load_config(config_path='config.yml'):
+    """Load YAML configuration file."""
     with open(config_path, 'r', encoding='utf-8') as file:
         config = yaml.safe_load(file)
     return config
 
+# Load Arguments & Config
 args = parse_args()
 config = load_config(args.config)
 
-CHECKPOINT_DATE = args.checkpoint_date  # 커맨드 라인에서 입력받음
+CHECKPOINT_DATE = args.checkpoint_date  
 
-# Extract config parameters
+# Extract Configuration Parameters
+# (Must match the parameters used during training)
 model_config = config['model']
 data_config = config['data']
 training_config = config['training']
 
-# Data paths
+# Path Configurations
 TEST_DATA_PATH = data_config['test_data_path']
 PATHWAY_GENE_INDICES_PATH = data_config['pathway_gene_indices_path']
 
-# Model parameters
+# Model Hyperparameters
 GENE_FFN_OUTPUT_DIM = model_config['gene_ffn_output_dim']
 DRUG_FFN_OUTPUT_DIM = model_config['drug_ffn_output_dim']
 GENE_INPUT_DIM = model_config.get('gene_input_dim', 154)
@@ -60,6 +64,7 @@ MAX_GENE_SLOTS = model_config['max_gene_slots']
 # Training parameters
 BATCH_SIZE = training_config['batch_size']
 
+# Parse Regressor Configuration
 DEFAULT_REGRESSOR_DIMS = [512, 512, 512, 256, 256]
 
 # Check for layer configs first (new format)
@@ -90,7 +95,9 @@ LOG_FILE = f"log/{FILE_NAME}/test.log"
 os.makedirs(RESULT_DIR, exist_ok=True)
 os.makedirs(os.path.dirname(LOG_FILE), exist_ok=True)
 
-# ========== Logging ==========
+# =============================================================================
+# [2] LOGGING & DATA LOADING
+# =============================================================================
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
@@ -99,10 +106,10 @@ logging.basicConfig(
         logging.StreamHandler()
     ]
 )
-logging.info("🧪 Starting 5-Fold Regression Test")
+logging.info("[TEST] Starting 5-Fold Regression Test")
 set_seed(42)
 
-# ========== Load Test Set ==========
+# Load Test Set
 test_data = torch.load(TEST_DATA_PATH)
 
 test_dataset = DrugResponseDataset(
@@ -115,19 +122,21 @@ test_dataset = DrugResponseDataset(
 )
 test_loader = DataLoader(test_dataset, batch_size=BATCH_SIZE, shuffle=False, collate_fn=collate_fn)
 
-# ========== Load Pathway Info ==========
+# Load Pathway Info
 pathway_gene_indices = torch.load(PATHWAY_GENE_INDICES_PATH)
 
-# ========== Evaluation ==========
+# =============================================================================
+# [3] EVALUATION LOOP
+# =============================================================================
 summary_stats = []
 all_fold_results = {}
 
 for fold in range(1, 6): 
-    logging.info(f"\n📂 Fold {fold} Evaluation Start")
+    logging.info(f"\n[>] Fold {fold} Evaluation Start")
     checkpoint_path = f'./checkpoints/{CHECKPOINT_DATE}/fold_{fold}/best_model.pth'
     # No need for fold-specific directories anymore
 
-    # --- 모델 초기화 수정 ---
+    # Initialize Model
     model = DrugResponseModel(
         pathway_gene_indices=pathway_gene_indices,
         gene_ffn_output_dim=GENE_FFN_OUTPUT_DIM,
@@ -193,7 +202,7 @@ for fold in range(1, 6):
             sample_indices_all.extend(sample_indices)
 
 
-    # 성능 지표 계산
+    # Calculate Performance Metrics
     actuals = np.array(actuals)
     predictions = np.array(predictions)
     rmse = np.sqrt(mean_squared_error(actuals, predictions))
@@ -201,7 +210,7 @@ for fold in range(1, 6):
     scc, _ = spearmanr(actuals, predictions)
     test_loss = total_loss / len(test_loader)
 
-    logging.info(f"✅ Fold {fold} Evaluation Complete")
+    logging.info(f"☑︎ Fold {fold} Evaluation Complete")
     logging.info(f"Test Loss: {test_loss:.4f}, RMSE: {rmse:.4f}, PCC: {pcc:.4f}, SCC: {scc:.4f}")
 
     # Store fold results
@@ -222,21 +231,23 @@ for fold in range(1, 6):
         "loss": test_loss
     })
 
-# ========== Save Consolidated Results ==========
+# =============================================================================
+# [4] SAVE & SUMMARIZE RESULTS
+# =============================================================================
 test_results_path = os.path.join(RESULT_DIR, "test_results.pt")
 torch.save(all_fold_results, test_results_path)
-logging.info(f"✅ Test results saved to {test_results_path}")
+logging.info(f"☑︎ Test results saved to {test_results_path}")
 
-# ========== Summary Save ==========
+# Save Summary
 summary_log_path = os.path.join(RESULT_DIR, "summary.log")
 with open(summary_log_path, "w") as f:
     for stat in summary_stats:
         f.write(f"Fold {stat['fold']} - Loss: {stat['loss']:.4f}, RMSE: {stat['rmse']:.4f}, "
                 f"PCC: {stat['pcc']:.4f}, SCC: {stat['scc']:.4f}\n")
 
-logging.info("🎯 All folds evaluated successfully. Summary saved.")
+logging.info("[DONE] All folds evaluated successfully. Summary saved.")
 
-# ========== Mean ± Std Summary ==========
+# Mean ± Std Summary
 import numpy as np
 
 def mean_std_str(arr):
@@ -247,14 +258,14 @@ pcc_list = [s["pcc"] for s in summary_stats]
 scc_list = [s["scc"] for s in summary_stats]
 loss_list = [s["loss"] for s in summary_stats]
 
-logging.info("📊 5-Fold Cross-Validation Summary (Mean ± Std)")
+logging.info("[SUMMARY] 5-Fold Cross-Validation Summary (Mean ± Std)")
 logging.info(f"RMSE: {mean_std_str(rmse_list)}")
 logging.info(f"PCC:  {mean_std_str(pcc_list)}")
 logging.info(f"SCC:  {mean_std_str(scc_list)}")
 logging.info(f"Loss: {mean_std_str(loss_list)}")
 
 with open(summary_log_path, "a") as f:
-    f.write("\n📊 Mean ± Std:\n")
+    f.write("\n[SUMMARY] Mean ± Std:\n")
     f.write(f"RMSE: {mean_std_str(rmse_list)}\n")
     f.write(f"PCC:  {mean_std_str(pcc_list)}\n")
     f.write(f"SCC:  {mean_std_str(scc_list)}\n")

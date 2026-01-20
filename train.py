@@ -16,7 +16,9 @@ from model import DrugResponseModel
 from utils import plot_statics, set_seed
 import shutil
 
-
+# =============================================================================
+# [1] SCHEDULER FACTORY
+# =============================================================================
 def create_scheduler(optimizer, scheduler_config, num_epochs, steps_per_epoch):
     """Create LR scheduler based on config"""
     scheduler_type = scheduler_config.get('type', None)
@@ -82,28 +84,28 @@ def create_scheduler(optimizer, scheduler_config, num_epochs, steps_per_epoch):
     logging.info(f"Created {scheduler_type} scheduler with step_type={step_type}")
     return scheduler, step_type
 
-# Parse command line
+# =============================================================================
+# [2] CONFIGURATION & SETUP
+# =============================================================================
 def parse_args():
+    """Parse command line arguments."""
     parser = argparse.ArgumentParser(description='Drug Response Prediction Training')
     parser.add_argument('--config', type=str, default='config.yml', 
                        help='Path to configuration file (default: config.yml)')
     return parser.parse_args()
 
-# Load configuration
 def load_config(config_path='config.yml'):
+    """Load YAML configuration file."""
     with open(config_path, 'r', encoding='utf-8') as file:
         config = yaml.safe_load(file)
     return config
 
-# Parse regressor configuration
 def parse_regressor_config(model_config):
-    """Parse regressor configuration from config file"""
-    
-    # 새로운 layer_configs 방식 확인
+    """Parse regressor configuration"""
+    # Check for new layer_configs style
     if 'regressor_layer_configs' in model_config:
         layer_configs = model_config['regressor_layer_configs']
         
-        # layer_configs를 개별 리스트로 변환
         hidden_dims = [layer['dim'] for layer in layer_configs]
         dropouts = [layer.get('dropout', 0.1) for layer in layer_configs]
         norms = [layer.get('norm', 'batch') for layer in layer_configs]
@@ -111,16 +113,16 @@ def parse_regressor_config(model_config):
         
         return {
             'regressor_hidden_dims': hidden_dims,
-            'regressor_dropouts': dropouts,  # 리스트
-            'regressor_norms': norms,        # 리스트
-            'regressor_acts': acts,          # 리스트
+            'regressor_dropouts': dropouts,  
+            'regressor_norms': norms,        
+            'regressor_acts': acts,          
             'regressor_residual_every': model_config.get('regressor_residual_every', 2),
             'regressor_residual_proj': model_config.get('regressor_residual_proj', True),
             'regressor_last_dropout': model_config.get('regressor_last_dropout', False),
             'regressor_final_norm': model_config.get('regressor_final_norm', False)
         }
     
-    # 기존 방식 (하위 호환성)
+    # Legacy style support
     else:
         DEFAULT_REGRESSOR_DIMS = [512, 512, 512, 256, 256]
         explicit_hidden_dims = model_config.get('regressor_hidden_dims')
@@ -149,20 +151,23 @@ def parse_regressor_config(model_config):
             'regressor_final_norm': model_config.get('regressor_final_norm', False)
         }
 
+# Initial Setup
 args = parse_args()
 config = load_config(args.config)
 
+# System Settings
 os.environ['TZ'] = config['system']['timezone']
 time.tzset()
 os.environ['PYTORCH_CUDA_ALLOC_CONF'] = config['system']['pytorch_cuda_alloc_conf']
 
-# Fixed directory paths
+# Fixed Directory Paths
 CHECKPOINT_DIR = "./checkpoints"
 PLOT_DIR = "./plots"
 LOG_DIR = "log"
 WEIGHTS_DIR = "weights"
 RESULTS_DIR = "results"
 
+# Device Configuration
 device = config['training']['device']
 if device == "cuda:0" and not torch.cuda.is_available():
     device = "cpu"
@@ -175,18 +180,18 @@ model_config = config['model']
 data_config = config['data']
 system_config = config['system']
 
-# --- 모델 파라미터 추출 수정 ---
+# Model Hyperparameters
 GENE_FFN_OUTPUT_DIM = model_config['gene_ffn_output_dim']
-DRUG_FFN_OUTPUT_DIM = model_config['drug_ffn_output_dim'] # ChemBERTa FFN 출력 차원
+DRUG_FFN_OUTPUT_DIM = model_config['drug_ffn_output_dim'] 
 MAX_GENE_SLOTS = model_config['max_gene_slots']
-GENE_INPUT_DIM = model_config['gene_input_dim'] # Gene FFN 입력 차원
-DRUG_INPUT_DIM = model_config.get('drug_input_dim', 768) # ChemBERTa 입력 차원
-IS_DIFFER = model_config.get('isDiffer', True) # 차등 크로스 어텐션 사용 여부
+GENE_INPUT_DIM = model_config['gene_input_dim'] 
+DRUG_INPUT_DIM = model_config.get('drug_input_dim', 768) 
+IS_DIFFER = model_config.get('isDiffer', True) # Toggle for Differential Cross Attention
 CROSS_ATTN_EMBEDDING_DIM = model_config['cross_attn_embedding_dim']
 FINAL_EMBEDDING_DIM = model_config['final_embedding_dim']
 OUTPUT_DIM = model_config['output_dim']
 
-# Parse regressor configuration
+# Parse Regressor Cofig
 regressor_config = parse_regressor_config(model_config)
 
 BATCH_SIZE = training_config['batch_size']
@@ -194,12 +199,14 @@ FILE_NAME = os.environ.get("RUN_NAME", datetime.now().strftime('%Y%m%d_%H'))
 DEVICE = training_config['device']
 SAVE_FOLD_NUMBER = save_config['save_fold_number'] 
 
+# Directory Setup
 log_dir = f"{LOG_DIR}/{FILE_NAME}"
 os.makedirs(log_dir, exist_ok=True)
 log_filename = f"{log_dir}/train.log"
 chpt_dir = f"{CHECKPOINT_DIR}/{FILE_NAME}"
 os.makedirs(chpt_dir, exist_ok=True)
 
+# Logging Setup
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
@@ -230,23 +237,26 @@ set_seed(system_config['seed'])
 # Common Data Load
 pathway_gene_indices = torch.load(data_config['pathway_gene_indices_path'])
 
-# Helper Function
+# =============================================================================
+# [3] TRAINING HELPER FUNCTION
+# =============================================================================
 def process_batch(batch_idx, batch, epoch, model, criterion, device, mode="train", is_best_epoch=False, save_weights=False, save_dir_root=None):
     gene_embeddings = batch['gene_embeddings'].to(device)
-    drug_embeddings = batch['drug_embeddings'].to(device)  # [B, 1, 768]
-    drug_substructure_embeddings = batch['drug_substructure_embeddings'].to(device)  # [B, L, 768]
-    drug_substructure_masks = batch['drug_substructure_masks'].to(device)  # Drug attention masks [B, L]
+    drug_embeddings = batch['drug_embeddings'].to(device) 
+    drug_substructure_embeddings = batch['drug_substructure_embeddings'].to(device)  
+    drug_substructure_masks = batch['drug_substructure_masks'].to(device)  
     labels = batch['labels'].to(device)
     sample_indices = batch['sample_indices']
 
-    # --- 새로운 모델 반환값 ---
+    # Forward Pass
     outputs, path2drug_weights, drug2path_weights, pathway_embeddings = model(gene_embeddings, drug_embeddings, drug_substructure_embeddings, drug_substructure_masks)
     outputs = outputs.squeeze(dim=-1) 
-    loss = criterion(outputs, labels) 
 
+    # Calculate Loss (MSE)
+    loss = criterion(outputs, labels) 
     rmse = torch.sqrt(loss).item()  
 
-    # --- Save weights 부분 수정 ---
+    # Save Attention Weights
     if mode == "train" and save_weights and save_config['isSave']:
         save_dir = f"{save_dir_root}/current_epoch"
         os.makedirs(save_dir, exist_ok=True)
@@ -257,9 +267,11 @@ def process_batch(batch_idx, batch, epoch, model, criterion, device, mode="train
 
     return outputs, loss, rmse, sample_indices, labels
 
-# 5-Fold Cross-Validation
+# =============================================================================
+# [4] MAIN TRAINING LOOP (5-Fold CV)
+# ============================================================================
 for fold in range(1, 6):
-    logging.info(f"🚩 Starting Fold {fold}")
+    logging.info(f"▶ Starting Fold {fold}")
 
     # Fold Directory Setting
     fold_checkpoint_dir = f"{chpt_dir}/fold_{fold}"
@@ -272,10 +284,11 @@ for fold in range(1, 6):
     
     train_dataset = DrugResponseDataset(**fold_data['train'])
     val_dataset = DrugResponseDataset(**fold_data['validation'])
+
     train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True, collate_fn=collate_fn, num_workers=4, pin_memory=True)
     val_loader = DataLoader(val_dataset, batch_size=BATCH_SIZE, shuffle=False, collate_fn=collate_fn, num_workers=4, pin_memory=True)
     
-        
+    # Initialize Model    
     model = DrugResponseModel(
         pathway_gene_indices=pathway_gene_indices,
         gene_ffn_output_dim=GENE_FFN_OUTPUT_DIM,
@@ -314,12 +327,14 @@ for fold in range(1, 6):
         len(train_loader)
     )
 
-    # Training Loop
+    # Variables for Monitoring
     train_rmses, val_rmses = [], []
-
     best_val_rmse = float('inf')
     patience_counter = 0
 
+    # ==========================
+    # Epoch Loop
+    # ==========================
     for epoch in range(training_config['num_epochs']):
         epoch_start = time.time()
         logging.info(f"Epoch [{epoch+1}/{training_config['num_epochs']}] started.")
@@ -327,14 +342,20 @@ for fold in range(1, 6):
         train_actuals, train_predictions, train_samples = [], [], []
         val_actuals, val_predictions, val_samples = [], [], []
 
+        # ----------------------
         # Training Phase
+        # ----------------------
         model.train()
         total_train_se, total_train_samples = 0, 0
 
         for batch_idx, batch in enumerate(tqdm(train_loader, desc=f"Train Epoch {epoch+1}")):
             optimizer.zero_grad()
+
+            # Save weights condition
             save_weights_this_epoch = (fold == SAVE_FOLD_NUMBER) and (epoch + 1 >= 40) and save_config['isSave'] # After 40 Epochs, Specific Fold for File Memorization Save
+            
             outputs, loss, rmse, sample_indices, labels  = process_batch(batch_idx, batch, epoch+1, model, criterion, DEVICE, mode="train", is_best_epoch=False, save_weights=save_weights_this_epoch, save_dir_root=fold_attn_dir)
+            
             loss.backward()
             optimizer.step()
 
@@ -342,6 +363,7 @@ for fold in range(1, 6):
             if scheduler is not None and scheduler_step_type == 'batch':
                 scheduler.step()
 
+            # Accumulate metrics
             se = ((outputs.detach() - labels.detach()) ** 2).sum()
             total_train_se += se.item()
             total_train_samples += labels.numel()
@@ -353,7 +375,9 @@ for fold in range(1, 6):
         train_rmse = (total_train_se / total_train_samples) ** 0.5         
         train_rmses.append(train_rmse)
 
+        # ----------------------
         # Validation Phase
+        # ----------------------
         model.eval()
         total_val_se, total_val_samples = 0, 0
 
@@ -371,7 +395,7 @@ for fold in range(1, 6):
         val_rmse = (total_val_se / total_val_samples) ** 0.5         
         val_rmses.append(val_rmse)
 
-        # SCC/PCC
+        # Compute Correlations (PCC & SCC)
         train_actuals_np = torch.stack(train_actuals).cpu().numpy()
         train_predictions_np = torch.stack(train_predictions).detach().cpu().numpy()
         val_actuals_np = torch.stack(val_actuals).cpu().numpy()
@@ -382,7 +406,7 @@ for fold in range(1, 6):
         val_pcc = pearsonr(val_actuals_np, val_predictions_np)[0]
         val_scc = spearmanr(val_actuals_np, val_predictions_np)[0]
 
-        # Get current LR for logging
+        # Log Metrics
         current_lr = optimizer.param_groups[0]['lr']
         logging.info(f"Fold {fold} Epoch [{epoch+1}/{training_config['num_epochs']}] completed. \n"
                      f"Train RMSE: {train_rmse:.4f}, Train PCC: {train_pcc:.4f}, Train SCC: {train_scc:.4f}\n"
@@ -397,12 +421,14 @@ for fold in range(1, 6):
             elif scheduler_step_type == 'epoch_metric':
                 scheduler.step(val_rmse)
 
-        # Check Early Stopping and manage weights
+        # ----------------------
+        # Checkpointing & Early Stopping
+        # ----------------------
         if val_rmse < best_val_rmse:
             best_val_rmse = val_rmse
             patience_counter = 0
 
-            # Save Best Model
+            # Save Best Model State
             torch.save({
                 'epoch': epoch + 1,
                 'model_state_dict': model.state_dict(),
@@ -411,19 +437,19 @@ for fold in range(1, 6):
                 'val_rmse': val_rmse,
             }, os.path.join(fold_checkpoint_dir, "best_model.pth"))
 
-            # Current epoch weights → best epoch weights
+            # Logic: Move weights from 'current_epoch' to 'best_epoch' directory
             current_weights_dir = f"{fold_attn_dir}/current_epoch"
             best_weights_dir = f"{fold_attn_dir}/best_epoch"
             
-            # Remove old best weights
+            # Clean old best weights
             if os.path.exists(best_weights_dir):
                 import shutil
                 shutil.rmtree(best_weights_dir)
             
-            # Move current weights → best weights
+            # Promote current weights to best
             if os.path.exists(current_weights_dir):
                 os.rename(current_weights_dir, best_weights_dir)
-                logging.info(f"✅ Weights saved for Fold {fold}, Epoch {epoch+1} (RMSE: {val_rmse:.4f})")
+                logging.info(f"☑︎ Weights saved for Fold {fold}, Epoch {epoch+1} (RMSE: {val_rmse:.4f})")
 
         else:
             patience_counter += 1
@@ -433,11 +459,11 @@ for fold in range(1, 6):
             if os.path.exists(current_weights_dir):
                 import shutil
                 shutil.rmtree(current_weights_dir)
-                logging.info(f"🗑️ Weights deleted for Fold {fold}, Epoch {epoch+1} (not best)")
+                logging.info(f"[-] Weights deleted for Fold {fold}, Epoch {epoch+1} (not best)")
             
-            logging.info(f"⚠️ No improvement in validation RMSE. Patience: {patience_counter}/{training_config['early_stopping_patience']}")
+            logging.info(f"[!] No improvement in validation RMSE. Patience: {patience_counter}/{training_config['early_stopping_patience']}")
             if patience_counter >= training_config['early_stopping_patience']:
-                logging.info("🛑 Early stopping triggered. Training terminated.")
+                logging.info("[STOP] Early stopping triggered. Training terminated.")
                 break
 
         plot_statics(FILE_NAME, f"Fold {fold}", train_rmses, val_rmses)
@@ -447,10 +473,10 @@ for fold in range(1, 6):
         
         if os.path.exists(current_fold_weights_dir):
             shutil.rmtree(current_fold_weights_dir)
-            logging.info(f"🗑️ Deleted weights for Fold {fold} (not Fold {SAVE_FOLD_NUMBER})")
+            logging.info(f"[-] Deleted weights for Fold {fold} (not Fold {SAVE_FOLD_NUMBER})")
         
     else:
-        logging.info(f"✅ Keeping Fold {fold} as the fixed fold to save")
+        logging.info(f"☑︎ Keeping Fold {fold} as the fixed fold to save")
 
 # Save the specified fold's results
 target_fold_result_dir = f"{RESULTS_DIR}/{FILE_NAME}"
@@ -495,7 +521,7 @@ if os.path.exists(target_fold_weights_dir):
     
     model.eval()
     
-    # Generate train predictions
+    # Generate Predictions for Training Set
     target_fold_train_actuals, target_fold_train_predictions, target_fold_train_samples = [], [], []
     with torch.no_grad():
         for batch in tqdm(target_fold_train_loader, desc=f"Generating Fold {SAVE_FOLD_NUMBER} train predictions"):
@@ -504,7 +530,7 @@ if os.path.exists(target_fold_weights_dir):
             target_fold_train_predictions.extend(outputs)
             target_fold_train_samples.extend(sample_indices)
     
-    # Generate validation predictions
+    # Generate Predictions for Validation Set
     target_fold_val_actuals, target_fold_val_predictions, target_fold_val_samples = [], [], []
     with torch.no_grad():
         for batch in tqdm(target_fold_val_loader, desc=f"Generating Fold {SAVE_FOLD_NUMBER} validation predictions"):
@@ -527,22 +553,22 @@ if os.path.exists(target_fold_weights_dir):
         "sample_indices": target_fold_val_samples
     }, os.path.join(target_fold_result_dir, f"val_results_fold_{SAVE_FOLD_NUMBER}.pt"))
     
-    logging.info(f"✅ Fold {SAVE_FOLD_NUMBER} train and validation results saved in {target_fold_result_dir}")
+    logging.info(f"☑︎ Fold {SAVE_FOLD_NUMBER} train and validation results saved in {target_fold_result_dir}")
     
-    # Move the target fold's weights → final location
+    # Finalize Weight Directory Structure
     best_epoch_weights = f"{target_fold_weights_dir}/best_epoch"
     if os.path.exists(best_epoch_weights):
         for file in os.listdir(best_epoch_weights):
             src = os.path.join(best_epoch_weights, file)
             dst = os.path.join(target_fold_weights_dir, file)
             shutil.copy2(src, dst)
-        logging.info(f"✅ Fold {SAVE_FOLD_NUMBER} weights saved in {target_fold_weights_dir}")
+        logging.info(f"☑︎ Fold {SAVE_FOLD_NUMBER} weights saved in {target_fold_weights_dir}")
     
-    # Clean up
+    # Cleanup temporary directories
     if os.path.exists(best_epoch_weights):
         shutil.rmtree(best_epoch_weights)
     current_epoch_dir = f"{target_fold_weights_dir}/current_epoch"
     if os.path.exists(current_epoch_dir):
         shutil.rmtree(current_epoch_dir)
 else:
-    logging.warning(f"⚠️ Fold {SAVE_FOLD_NUMBER} weights directory not found!")
+    logging.warning(f"[!] Fold {SAVE_FOLD_NUMBER} weights directory not found!")

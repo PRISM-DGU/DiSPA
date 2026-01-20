@@ -2,17 +2,21 @@ import torch
 import torch.nn as nn
 from typing import List, Optional, Union
 
+# =============================================================================
+# DEEP REGRESSOR HEAD
+# =============================================================================
 class DeepRegressorHead(nn.Module):
     """
-    입력: [B, input_dim], 출력: [B, out_dim]
-    - hidden_dims: 각 층 너비 리스트 (예: [512, 512, 256, 256])
-    - dropout: float 또는 각 층의 dropout 리스트
-    - norm: str 또는 각 층의 normalization 리스트 ("batch" | "layer" | None)
-    - act: str 또는 각 층의 activation 리스트 ("relu" | "gelu" | "silu")
-    - residual_every: N>0 이면 N개 층마다 잔차 연결
-    - residual_proj: 폭이 다를 때도 잔차를 쓰고 싶으면 True (1x1 Linear로 투영)
-    - last_dropout: 마지막 블록 뒤 드롭아웃 적용 여부
-    - final_norm: 출력층 전에 한 번 더 정규화 (회귀에서 과도하면 False 권장)
+    Input: [B, input_dim] -> Output: [B, out_dim]
+
+    - hidden_dims: List of hidden layer widths (e.g., [512, 512, 256]).
+    - dropout: Dropout rate (float) or list per layer.
+    - norm: Normalization type ("batch" | "layer" | None). Can be a list.
+    - act: Activation function ("relu" | "gelu" | "silu"). Can be a list.
+    - residual_every: Apply residual connection every N layers (0 to disable).
+    - residual_proj: Use 1x1 projection for dimension mismatch in residuals.
+    - last_dropout: Whether to apply dropout after the last hidden block.
+    - final_norm: Apply normalization before the final output layer.
     """
     def __init__(
         self,
@@ -30,7 +34,8 @@ class DeepRegressorHead(nn.Module):
         super().__init__()
         assert len(hidden_dims) >= 1
         
-        # 리스트가 아닌 경우 리스트로 변환 (하위 호환성)
+        # [Configuration Standardization]
+        # Convert single values to lists to ensure uniform handling per layer.
         if not isinstance(dropout, list):
             dropout = [dropout] * len(hidden_dims)
         if not isinstance(norm, list):
@@ -38,13 +43,16 @@ class DeepRegressorHead(nn.Module):
         if not isinstance(act, list):
             act = [act] * len(hidden_dims)
         
-        # 길이 검증
+        # [Validation] Ensure configuration lists match the network depth.
         assert len(dropout) == len(hidden_dims), f"dropout list length {len(dropout)} != hidden_dims length {len(hidden_dims)}"
         assert len(norm) == len(hidden_dims), f"norm list length {len(norm)} != hidden_dims length {len(hidden_dims)}"
         assert len(act) == len(hidden_dims), f"act list length {len(act)} != hidden_dims length {len(hidden_dims)}"
 
-        # --- Activation factory ---
+        # ---------------------------------------------------------------------
+        # [Factory Methods] Component Initialization
+        # ---------------------------------------------------------------------
         def make_activation(act_type):
+            """Returns the requested activation module."""
             if act_type == "relu":
                 return nn.ReLU
             elif act_type == "silu":
@@ -52,8 +60,8 @@ class DeepRegressorHead(nn.Module):
             else:
                 return nn.GELU
 
-        # --- Norm factory ---
         def make_norm(norm_type, d):
+            """Returns the requested normalization module."""
             if norm_type == "batch":
                 return nn.BatchNorm1d(d)
             elif norm_type == "layer":
@@ -68,18 +76,22 @@ class DeepRegressorHead(nn.Module):
         self.blocks = nn.ModuleList()
         self.residual_adapters = nn.ModuleDict()  # projection for residual when width changes
 
+        # ---------------------------------------------------------------------
+        # [Network Construction] Building Layers
+        # ---------------------------------------------------------------------
         for i in range(1, len(dims)):
             in_d, out_d = dims[i-1], dims[i]
             layer_idx = i - 1  # hidden layer index
 
-            # 레이어별 설정
+            # Layer-specific settings
             layer_act = act[layer_idx]
             layer_norm = norm[layer_idx]
             layer_dropout = dropout[layer_idx]
             
-            # Activation 생성
+            
             Activation = make_activation(layer_act)
 
+            # Construct the block: Linear -> Norm -> Activation -> Dropout
             block = nn.Sequential(
                 nn.Linear(in_d, out_d),
                 make_norm(layer_norm, out_d),
@@ -88,25 +100,25 @@ class DeepRegressorHead(nn.Module):
             )
             self.blocks.append(block)
 
-            # 준비: 폭이 다른 구간에 대한 residual projection (N개 층마다)
+            # [Residual Connection Setup]
             if self.residual_every and (i % self.residual_every == 0) and (in_d != out_d) and self.residual_proj:
                 self.residual_adapters[str(i)] = nn.Linear(in_d, out_d, bias=False)
 
-        # Final normalization
+        # Final Normalization (Optional)
         if final_norm:
-            # 마지막 레이어의 norm 타입 사용
             final_norm_type = norm[-1] if isinstance(norm, list) else norm
             self.final_norm = make_norm(final_norm_type, dims[-1])
         else:
             self.final_norm = nn.Identity()
             
+        # Final Output Projection (Latent -> Target)
         self.out = nn.Linear(dims[-1], out_dim)
 
-        # --- Initialization ---
+        # Initialize Weights
         self._init_weights()
     
     def _init_weights(self):
-        """Initialize weights for all linear layers"""
+        """Initialize weights using Xavier Uniform distribution."""
         for m in self.modules():
             if isinstance(m, nn.Linear):
                 nn.init.xavier_uniform_(m.weight)
@@ -114,6 +126,9 @@ class DeepRegressorHead(nn.Module):
                     nn.init.zeros_(m.bias)
 
     def forward(self, x):
+        """
+        Forward pass with Residual Connections.
+        """
         z = x
         for i, block in enumerate(self.blocks, start=1):
             h = block(z)
