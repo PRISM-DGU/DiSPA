@@ -50,21 +50,4 @@ python test.py --checkpoint_date 20250712_21
 
 Results saved to `results/`
 
-## Configuration
-
-
-Edit `config.yml` to chang[overview.pdf](https://github.com/user-attachments/files/24760281/overview.pdf)
-e hyperparameters:
-
-```yaml
-training:
-  batch_size: 2048
-  learning_rate: 0.0004
-  num_epochs: 300
-
-model:
-  isDiffer: true      # Use differential attention
-  num_heads: 4
-  depth: 1
-```
 **Note:** Full hyperparameters will be updated soon.
